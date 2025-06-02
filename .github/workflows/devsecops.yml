@@ -31,10 +31,9 @@ jobs:
         run: docker build -t my-juice-shop:latest .
 
       - name: Secret scan (Gitleaks)
-        continue-on-error: true
         uses: zricethezav/gitleaks-action@v2
         with:
-          args: --no-git --path=.
+          args: --no-git --config=.gitleaks.toml --redact -v --report-format=sarif --report-path=results.sarif
 
       - name: Static Code Analysis (Semgrep)
         continue-on-error: true
