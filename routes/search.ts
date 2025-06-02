@@ -10,6 +10,7 @@ import * as models from '../models/index'
 import { UserModel } from '../models/user'
 import { challenges } from '../data/datacache'
 import * as challengeUtils from '../lib/challengeUtils'
+import sequelize from 'sequelize'
 
 class ErrorWithParent extends Error {
   parent: Error | undefined
@@ -20,10 +21,18 @@ export function searchProducts () {
   return (req: Request, res: Response, next: NextFunction) => {
     let criteria: any = req.query.q === 'undefined' ? '' : req.query.q ?? ''
     criteria = (criteria.length <= 200) ? criteria : criteria.substring(0, 200)
-    models.sequelize.query(`SELECT * FROM Products WHERE ((name LIKE '%${criteria}%' OR description LIKE '%${criteria}%') AND deletedAt IS NULL) ORDER BY name`) // vuln-code-snippet vuln-line unionSqlInjectionChallenge dbSchemaChallenge
-      .then(([products]: any) => {
+    const sanitizedCriteria = `%${criteria}%` // dodajemy wildcardy tutaj
+
+    models.sequelize.query(
+      'SELECT * FROM Products WHERE ((name LIKE ? OR description LIKE ?) AND deletedAt IS NULL) ORDER BY name',
+      {
+        replacements: [sanitizedCriteria, sanitizedCriteria],
+        type: sequelize.QueryTypes.SELECT
+      }
+    )
+      .then((products: any[]) => {
         const dataString = JSON.stringify(products)
-        if (challengeUtils.notSolved(challenges.unionSqlInjectionChallenge)) { // vuln-code-snippet hide-start
+        if (challengeUtils.notSolved(challenges.unionSqlInjectionChallenge)) {
           let solved = true
           UserModel.findAll().then(data => {
             const users = utils.queryResultToJson(data)
@@ -42,6 +51,7 @@ export function searchProducts () {
             next(error)
           })
         }
+
         if (challengeUtils.notSolved(challenges.dbSchemaChallenge)) {
           let solved = true
           void models.sequelize.query('SELECT sql FROM sqlite_master').then(([data]: any) => {
@@ -60,15 +70,18 @@ export function searchProducts () {
               }
             }
           })
-        } // vuln-code-snippet hide-end
+        }
+
         for (let i = 0; i < products.length; i++) {
           products[i].name = req.__(products[i].name)
           products[i].description = req.__(products[i].description)
         }
+
         res.json(utils.queryResultToJson(products))
       }).catch((error: ErrorWithParent) => {
         next(error.parent)
       })
   }
 }
+
 // vuln-code-snippet end unionSqlInjectionChallenge dbSchemaChallenge
