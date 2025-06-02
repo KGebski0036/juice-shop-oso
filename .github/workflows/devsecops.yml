@@ -1,0 +1,69 @@
+name: DevSecOps CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Audit dependencies (npm audit)
+        run: npm audit --audit-level=high
+        env:
+          CI: true
+
+      - name: Build Docker image
+        run: docker build -t my-juice-shop:latest .
+
+      - name: Secret scan (Gitleaks)
+        uses: zricethezav/gitleaks-action@v2
+        with:
+          args: --no-git --path=.
+
+      - name: Static Code Analysis (Semgrep)
+        run: |
+          pip install semgrep
+          semgrep --config auto .
+
+      - name: Start Juice Shop container (DAST target)
+        run: docker run -d -p 3000:3000 --name juice-shop-test my-juice-shop:latest
+
+      - name: Wait for Juice Shop startup
+        run: |
+          for i in {1..10}; do
+            if docker logs juice-shop-test | grep -q "Listening on port 3000"; then
+              echo "Juice Shop started";
+              break;
+            fi
+            sleep 2
+          done
+
+      - name: OWASP ZAP DAST Scan
+        uses: zaproxy/action-full-scan@v0.7.0
+        with:
+          target: "http://localhost:3000"
+          fail_action: false
+
+      - name: Container image scan (Trivy)
+        continue-on-error: true
+        run: |
+          docker pull aquasec/trivy:latest
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity HIGH,CRITICAL my-juice-shop:latest
+  
+      - name: Stop test container
+        if: always()
+        run: docker stop juice-shop-test
